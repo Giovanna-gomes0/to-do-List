@@ -1,0 +1,115 @@
+services:
+  backend-db:
+    image: mysql:8.0
+    container_name: todolist_backend_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3406:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - api_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+
+  # Para rodar os testes do backend:
+  # docker-compose --profile test up --exit-code-from backend-tests backend-tests
+  backend-test-db:
+    image: mysql:8.0
+    container_name: todolist_backend_test_db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    ports:
+      - "3307:3306"
+    networks:
+      - api_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 10s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+    profiles:
+      - test
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: todolist_backend_api
+    restart: unless-stopped
+    depends_on:
+      backend-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://backend-db:3306/${MYSQL_DATABASE}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+    ports:
+      - "8080:8080"
+    networks:
+      - api_network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+      timeout: 10s
+      retries: 10
+      interval: 10s
+      start_period: 40s
+
+  # Serviço para rodar testes automaticamente
+  # Uso: docker-compose --profile test run --rm backend-tests
+  # (inicia o banco, aguarda health check, roda testes e remove o container)
+  backend-tests:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.test
+    container_name: todolist_backend_tests
+    depends_on:
+      backend-test-db:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://backend-test-db:3306/${MYSQL_DATABASE}
+      SPRING_DATASOURCE_USERNAME: ${SPRING_DATASOURCE_USERNAME}
+      SPRING_DATASOURCE_PASSWORD: ${SPRING_DATASOURCE_PASSWORD}
+    networks:
+      - api_network
+    profiles:
+      - test
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: todolist_frontend_web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "3000:80"
+    networks:
+      - api_network
+
+  # frontend-mobile:
+  #   NOTA: Expo não funciona bem em Docker devido a conflitos de versão
+  #   Execute localmente: cd frontend-mobile && npm start
+
+volumes:
+  mysql_data:
+
+networks:
+  api_network:
+    driver: bridge
